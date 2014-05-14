@@ -3,15 +3,33 @@ package fetchers
 import (
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
+	"errors"
+	"fmt"
+	"strconv"
 	"time"
 )
 
 type KatRow struct {
 	Name   string
 	Magnet string
-	Size   float32
-	Files  uint32
+	Size   uint64
+Files  uint32
 	Age    time.Time
+}
+
+func parseSize(amount float64, qty string) (uint64, error) {
+	switch qty {
+	case "bytes":
+		return uint64(amount), nil
+	case "KB":
+		return uint64(amount * 1024), nil
+	case "MB":
+		return uint64(amount * 1024 * 1024), nil
+	case "GB":
+		return uint64(amount * 1024 * 1024 * 1024), nil
+	default:
+		return 0, errors.New(fmt.Sprintf("quantity inside html is not recognized: %v\n", qty))
+	}
 }
 
 func NewKatRow(n *html.Node) (k *KatRow) {
@@ -26,5 +44,21 @@ func NewKatRow(n *html.Node) (k *KatRow) {
 			break
 		}
 	}
-	return &KatRow{Name: name, Magnet: magnet}
+
+	sizeSelector := cascadia.MustCompile(".nobr.center")
+	sizeEl := sizeSelector.MatchFirst(n).FirstChild
+	sizeQty := sizeEl.NextSibling.FirstChild.Data
+
+	sizeAmount , err := strconv.ParseFloat(sizeEl.Data, 64)
+	if err != nil {
+		fmt.Printf("trying to parse: %#v", sizeEl.Data)
+		return
+	}
+	size, err := parseSize(sizeAmount, sizeQty)
+	if err != nil {
+		fmt.Println("Error sizesss!!!")
+		return nil
+	}
+
+	return &KatRow{Name: name, Magnet: magnet, Size: size}
 }

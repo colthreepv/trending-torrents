@@ -56,7 +56,7 @@ func fetchPage() (err error) {
 
 	for index, element := range torrentElements {
 		katSlice[index] = fetchers.NewKatRow(element)
-		fmt.Printf("element: %v\n", katSlice[index])
+		fmt.Printf("element: %#v\n", katSlice[index])
 	}
 	return
 }
@@ -65,8 +65,9 @@ func main() {
 	l := new(lastFetch)
 	for {
 		l.start()
-		fetchErr := fetchPage()
-		if fetchErr != nil {
+		err := fetchPage()
+		if err != nil {
+			fmt.Println(err)
 			os.Exit(HTTPERROR)
 		}
 		l.t1 = time.Now()
