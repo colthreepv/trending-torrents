@@ -55,8 +55,13 @@ func fetchPage() (err error) {
 	katSlice := make([] *fetchers.KatRow, len(torrentElements))
 
 	for index, element := range torrentElements {
-		katSlice[index] = fetchers.NewKatRow(element)
-		fmt.Printf("element: %#v\n", katSlice[index])
+		katSlice[index], err = fetchers.NewKatRow(element)
+		if err != nil {
+			fmt.Printf("trying creating a KatRow failed, :sadface:\n")
+			continue
+		}
+		// uber debug
+		fmt.Printf("element: %v\n", katSlice[index])
 	}
 	return
 }
