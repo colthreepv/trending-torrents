@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 	"github.com/mrgamer/trendingtorrents/fetchers"
 )
@@ -20,17 +19,23 @@ const (
 )
 
 type lastFetch struct {
-	t0, t1  time.Time
-	lastRun time.Duration
+	name     string
+	t0       time.Time
+	duration time.Duration
 }
 
-func (lst *lastFetch) start() {
-	lst.t0 = time.Now()
+func (l *lastFetch) start(name string) {
+	l.name = name
+	l.t0 = time.Now()
 }
 
-func (lst *lastFetch) calc() time.Duration {
-	lst.lastRun = lst.t1.Sub(lst.t0)
-	return lst.lastRun
+func (l *lastFetch) calc() *lastFetch {
+	l.duration = time.Now().Sub(l.t0)
+	return l
+}
+
+func (l *lastFetch) String() string {
+	return fmt.Sprintf("timer %s: %s", l.name, l.duration)
 }
 
 func fetchPage() (err error) {
@@ -67,16 +72,15 @@ func fetchPage() (err error) {
 }
 
 func main() {
-	l := new(lastFetch)
+	l := &lastFetch{}
 	for {
-		l.start()
+		l.start("fetch Kat")
 		err := fetchPage()
 		if err != nil {
 			fmt.Println(err)
-			os.Exit(HTTPERROR)
+			// os.Exit(HTTPERROR)
 		}
-		l.t1 = time.Now()
-		fmt.Printf("time elapsed : %v\n", l.calc())
+		fmt.Println(l.calc())
 		time.Sleep(MINWAIT)
 	}
 }
