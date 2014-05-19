@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-	"github.com/mrgamer/trendingtorrents/fetchers"
+	"./fetchers"
 )
 
 const (
