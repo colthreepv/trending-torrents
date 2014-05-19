@@ -1,13 +1,13 @@
 package main
 
 import (
+	"./fetchers"
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
 	"errors"
 	"fmt"
 	"net/http"
 	"time"
-	"./fetchers"
 )
 
 const (
@@ -18,28 +18,47 @@ const (
 	HTTPERROR = iota
 )
 
-type lastFetch struct {
-	name     string
+type fetch struct {
 	t0       time.Time
 	duration time.Duration
 }
 
-func (l *lastFetch) start(name string) {
-	l.name = name
-	l.t0 = time.Now()
+func NewFetch() *fetch {
+	return &fetch{t0: time.Now()}
 }
 
-func (l *lastFetch) calc() *lastFetch {
+func (l *fetch) calc() *fetch {
 	l.duration = time.Now().Sub(l.t0)
 	return l
 }
 
-func (l *lastFetch) String() string {
-	return fmt.Sprintf("timer %s: %s", l.name, l.duration)
+// struct that contains N fetches
+type fetchHistory struct {
+	h        []*fetch
+	quantity uint
 }
 
-func fetchPage() (err error) {
-	page, err := http.Get("http://kickass.to/new/")
+func (f *fetchHistory) add(singleFetch *fetch) {
+	f.h[f.quantity%uint(len(f.h))] = singleFetch
+	f.quantity++
+}
+
+func (f *fetchHistory) String() string {
+	var medianDuration time.Duration
+	for _, v := range f.h {
+		medianDuration += v.duration
+	}
+	medianDuration = medianDuration / time.Duration(len(f.h))
+	return medianDuration.String()
+}
+
+func NewHistory(howmany int) *fetchHistory {
+	return &fetchHistory{h: make([]*fetch, howmany)}
+}
+
+func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *fetchHistory) (err error) {
+	f := NewFetch() // start a timer
+	page, err := hClient.Get("http://kickass.to/new/")
 	if err != nil {
 		return
 	}
@@ -57,7 +76,7 @@ func fetchPage() (err error) {
 	katSelector := cascadia.MustCompile("table .odd, table .even")
 	torrentElements := katSelector.MatchAll(parsedPage)
 
-	katSlice := make([] *fetchers.KatRow, len(torrentElements))
+	katSlice := make([]*fetchers.KatRow, len(torrentElements))
 
 	for index, element := range torrentElements {
 		katSlice[index], err = fetchers.NewKatRow(element)
@@ -66,21 +85,48 @@ func fetchPage() (err error) {
 			continue
 		}
 		// uber debug
-		fmt.Printf("element: %v\n", katSlice[index])
+		// fmt.Printf("element: %v\n", katSlice[index])
 	}
+
+	// before returning the function "gives back" the Client to the channel
+	hChannel <- hClient
+	// enqueue history
+	history.add(f.calc())
 	return
 }
 
-func main() {
-	l := &lastFetch{}
-	for {
-		l.start("fetch Kat")
-		err := fetchPage()
-		if err != nil {
-			fmt.Println(err)
-			// os.Exit(HTTPERROR)
-		}
-		fmt.Println(l.calc())
-		time.Sleep(MINWAIT)
+type SpiderChannel struct {
+	c   chan *http.Client
+	qty uint16
+}
+
+func NewSpiderChan(howmany uint16) *SpiderChannel {
+	return &SpiderChannel{c: make(chan *http.Client), qty: howmany}
+}
+
+func createHttpChannels(howmany int, channel chan *http.Client) (err error) {
+	for i := 0; i < howmany; i++ {
+		channel <- &http.Client{}
 	}
+	return nil
+}
+
+func main() {
+	// sChannel := NewSpiderChan(uint16(400))
+	hChannel := make(chan *http.Client)
+	history := NewHistory(10)
+
+	go createHttpChannels(4, hChannel)
+
+	// gopher that handles the channel passing
+	for {
+		httpClient := <-hChannel
+		if history.quantity > 20 {
+			fmt.Printf("done 20 fetches, history: %s\n", history)
+			break
+		}
+		// fmt.Printf("http client received, awesum: %#v\n", httpClient)
+		go fetchPage(httpClient, hChannel, history)
+	}
+
 }
