@@ -1,10 +1,12 @@
 package fetchers
 
 import (
+	"../loggers"
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -43,15 +45,15 @@ func parseAge(timeAgo string) (*time.Time, error) {
 	var durationAgo time.Duration
 	switch splitTime[1] {
 	case "sec.":
-		durationAgo = time.Duration(numericTime)*time.Second
+		durationAgo = time.Duration(numericTime) * time.Second
 	case "min.":
-		durationAgo = time.Duration(numericTime)*time.Minute
-	case "hours":
-		durationAgo = time.Duration(numericTime)*time.Hour
+		durationAgo = time.Duration(numericTime) * time.Minute
+	case "hour", "hours":
+		durationAgo = time.Duration(numericTime) * time.Hour
 	case "day":
-		durationAgo = time.Duration(numericTime)*time.Hour*24
+		durationAgo = time.Duration(numericTime) * time.Hour * 24
 	case "week":
-		durationAgo = time.Duration(numericTime)*time.Hour*24*7
+		durationAgo = time.Duration(numericTime) * time.Hour * 24 * 7
 	default:
 		return nil, errors.New(fmt.Sprintf("duration not handled: %v\n", splitTime[1]))
 	}
@@ -99,4 +101,36 @@ func NewKatRow(n *html.Node) (k *KatRow, err error) {
 	}
 
 	return &KatRow{Name: name, Magnet: magnet, Size: size, Files: files, Age: age}, nil
+}
+
+func KatScout(done chan uint16, history *loggers.FetchHistory) (err error) {
+	f := loggers.NewRequest() // start a timer
+	htmlPage, err := http.Get("http://kickass.to/new/")
+	if err != nil {
+		history.Add(f.Fail(err)) // log errors to orient
+		return
+	}
+	defer htmlPage.Body.Close()
+	if htmlPage.StatusCode != http.StatusOK {
+		history.Add(f.Fail(err)) // log errors to orient
+		return errors.New(fmt.Sprintf("http returned non-OK statuscode: %d\n", htmlPage.StatusCode))
+	}
+
+	// checks done, let's kaboom this HTML
+	parsedPage, err := html.Parse(htmlPage.Body)
+	if err != nil {
+		return
+	}
+
+	// read how many pages
+	pages := cascadia.MustCompile(".turnoverButton.siteButton.bigButton:last-child").MatchFirst(parsedPage).FirstChild.Data
+	pagesParsed, err := strconv.ParseUint(pages, 10, 16)
+	if err != nil {
+		history.Add(f.Fail(err)) // log errors to orient
+		return
+	}
+
+	history.Add(f.Done())
+	done <- uint16(pagesParsed)
+	return nil
 }

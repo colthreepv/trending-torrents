@@ -19,20 +19,30 @@ const (
 	HTTPERROR = iota
 )
 
-func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *loggers.FetchHistory) (err error) {
+func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *loggers.FetchHistory, b *Board) (err error) {
 	f := loggers.NewRequest() // start a timer
-	page, err := hClient.Get("http://kickass.to/new/")
-	if err != nil {
+	p, err := b.Get()
+	if err != nil { // pages ended!
 		return
 	}
-	defer page.Body.Close()
-	if page.StatusCode != http.StatusOK {
-		return errors.New(fmt.Sprintf("http returned non-OK statuscode: %d\n", page.StatusCode))
+	htmlPage, err := hClient.Get(fmt.Sprintf("http://kickass.to/new/%d", p))
+	fmt.Printf("requesting page: %s\n", fmt.Sprintf("http://kickass.to/new/%d", p))
+	if err != nil {
+		history.Add(f.Fail(err)) // log errors to orient
+		b.Fail(p)
+		return
+	}
+	defer htmlPage.Body.Close()
+	if htmlPage.StatusCode != http.StatusOK {
+		history.Add(f.Fail(err)) // log errors to orient
+		b.Fail(p)
+		return errors.New(fmt.Sprintf("http returned non-OK statuscode: %d\n", htmlPage.StatusCode))
 	}
 
 	// checks done, let's kaboom this HTML
-	parsedPage, err := html.Parse(page.Body)
+	parsedPage, err := html.Parse(htmlPage.Body)
 	if err != nil {
+		b.Fail(p)
 		return
 	}
 	// create a selector for kat
@@ -44,7 +54,7 @@ func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *logger
 	for index, element := range torrentElements {
 		katSlice[index], err = fetchers.NewKatRow(element)
 		if err != nil {
-			fmt.Printf("trying creating a KatRow failed, :sadface:\n")
+			fmt.Printf("KatRow failed: %s\n", err)
 			continue
 		}
 		// uber debug
@@ -54,17 +64,8 @@ func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *logger
 	// before returning the function "gives back" the Client to the channel
 	hChannel <- hClient
 	// enqueue history
-	history.Add(f.Calc())
+	history.Add(f.Done())
 	return
-}
-
-type SpiderChannel struct {
-	c   chan *http.Client
-	qty uint16
-}
-
-func NewSpiderChan(howmany uint16) *SpiderChannel {
-	return &SpiderChannel{c: make(chan *http.Client), qty: howmany}
 }
 
 func createHttpChannels(howmany int, channel chan *http.Client) (err error) {
@@ -74,14 +75,42 @@ func createHttpChannels(howmany int, channel chan *http.Client) (err error) {
 	return nil
 }
 
+type Board struct {
+	Items []bool
+}
+
+// return the first non-fetched page
+func (b *Board) Get() (int, error) {
+	for i, v := range b.Items {
+		if v == false {
+			b.Items[i] = true
+			return i, nil
+		}
+	}
+	return 0, errors.New("board empty")
+}
+
+// in case of fetch failure it gives me back the page
+func (b *Board) Fail(page int) {
+	// double check because i'm a newbie after all
+	if b.Items[page] == false {
+		fmt.Println("SERIOSLY WTF HANPPNED HERZ???!!")
+	}
+	b.Items[page] = false
+}
+
 func main() {
-	// sChannel := NewSpiderChan(uint16(400))
 	hChannel := make(chan *http.Client)
 	history := loggers.NewHistory(10)
+	KatReady := make(chan uint16)
 
 	go createHttpChannels(4, hChannel)
+	go fetchers.KatScout(KatReady, history)
 
-	// gopher that handles the channel passing
+	// this will become a gopher
+	pages := <-KatReady
+	fmt.Printf("pages reported from scout: %d\n", pages)
+	board := &Board{Items: make([]bool, int(pages))}
 	for {
 		httpClient := <-hChannel
 		if history.Quantity > 20 {
@@ -89,7 +118,7 @@ func main() {
 			break
 		}
 		// fmt.Printf("http client received, awesum: %#v\n", httpClient)
-		go fetchPage(httpClient, hChannel, history)
+		go fetchPage(httpClient, hChannel, history, board)
 	}
 
 }

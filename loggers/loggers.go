@@ -1,21 +1,32 @@
 package loggers
 
 import (
+	"fmt"
 	"time"
 )
 
 type TimedRequest struct {
 	t0       time.Time
 	duration time.Duration
+	success  bool
+	err      error
 }
 
 func NewRequest() *TimedRequest {
 	return &TimedRequest{t0: time.Now()}
 }
 
-func (l *TimedRequest) Calc() *TimedRequest {
-	l.duration = time.Now().Sub(l.t0)
-	return l
+func (t *TimedRequest) Done() *TimedRequest {
+	t.duration = time.Now().Sub(t.t0)
+	t.success = true
+	return t
+}
+
+func (t *TimedRequest) Fail(err error) *TimedRequest {
+	t.duration = time.Now().Sub(t.t0)
+	t.err = err
+	fmt.Println(err)
+	return t
 }
 
 // struct that contains N fetches
