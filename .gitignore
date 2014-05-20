@@ -1,7 +1,5 @@
-# IntelliJ
+# intelliJ
 .idea
-*.iml
 
-# Binary
-*.exe
-bin/*
+# compiled
+bin/
