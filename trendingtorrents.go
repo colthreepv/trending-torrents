@@ -2,6 +2,7 @@ package main
 
 import (
 	"./fetchers"
+	"./loggers"
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
 	"errors"
@@ -18,46 +19,8 @@ const (
 	HTTPERROR = iota
 )
 
-type fetch struct {
-	t0       time.Time
-	duration time.Duration
-}
-
-func NewFetch() *fetch {
-	return &fetch{t0: time.Now()}
-}
-
-func (l *fetch) calc() *fetch {
-	l.duration = time.Now().Sub(l.t0)
-	return l
-}
-
-// struct that contains N fetches
-type fetchHistory struct {
-	h        []*fetch
-	quantity uint
-}
-
-func (f *fetchHistory) add(singleFetch *fetch) {
-	f.h[f.quantity%uint(len(f.h))] = singleFetch
-	f.quantity++
-}
-
-func (f *fetchHistory) String() string {
-	var medianDuration time.Duration
-	for _, v := range f.h {
-		medianDuration += v.duration
-	}
-	medianDuration = medianDuration / time.Duration(len(f.h))
-	return medianDuration.String()
-}
-
-func NewHistory(howmany int) *fetchHistory {
-	return &fetchHistory{h: make([]*fetch, howmany)}
-}
-
-func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *fetchHistory) (err error) {
-	f := NewFetch() // start a timer
+func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *loggers.FetchHistory) (err error) {
+	f := loggers.NewRequest() // start a timer
 	page, err := hClient.Get("http://kickass.to/new/")
 	if err != nil {
 		return
@@ -91,7 +54,7 @@ func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *fetchH
 	// before returning the function "gives back" the Client to the channel
 	hChannel <- hClient
 	// enqueue history
-	history.add(f.calc())
+	history.Add(f.Calc())
 	return
 }
 
@@ -114,14 +77,14 @@ func createHttpChannels(howmany int, channel chan *http.Client) (err error) {
 func main() {
 	// sChannel := NewSpiderChan(uint16(400))
 	hChannel := make(chan *http.Client)
-	history := NewHistory(10)
+	history := loggers.NewHistory(10)
 
 	go createHttpChannels(4, hChannel)
 
 	// gopher that handles the channel passing
 	for {
 		httpClient := <-hChannel
-		if history.quantity > 20 {
+		if history.Quantity > 20 {
 			fmt.Printf("done 20 fetches, history: %s\n", history)
 			break
 		}
