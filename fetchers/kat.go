@@ -1,9 +1,11 @@
 package fetchers
 
 import (
-	"../loggers"
+	"github.com/mrgamer/trendingtorrents/loggers"
+
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
+
 	"errors"
 	"fmt"
 	"net/http"
@@ -103,7 +105,7 @@ func NewKatRow(n *html.Node) (k *KatRow, err error) {
 	return &KatRow{Name: name, Magnet: magnet, Size: size, Files: files, Age: age}, nil
 }
 
-func KatScout(done chan uint16, history *loggers.FetchHistory) (err error) {
+func KatScout(done chan uint16, history *loggers.RequestHistory) (err error) {
 	f := loggers.NewRequest() // start a timer
 	htmlPage, err := http.Get("http://kickass.to/new/")
 	if err != nil {

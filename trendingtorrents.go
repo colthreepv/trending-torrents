@@ -1,10 +1,12 @@
 package main
 
 import (
-	"./fetchers"
-	"./loggers"
+	"github.com/mrgamer/trendingtorrents/fetchers"
+	"github.com/mrgamer/trendingtorrents/loggers"
+
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
+
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,7 +21,7 @@ const (
 	HTTPERROR = iota
 )
 
-func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *loggers.FetchHistory, b *Board) (err error) {
+func fetchPage(hClient *http.Client, hChannel chan *http.Client, history *loggers.RequestHistory, b *Board) (err error) {
 	f := loggers.NewRequest() // start a timer
 	p, err := b.Get()
 	if err != nil { // pages ended!
@@ -92,10 +94,6 @@ func (b *Board) Get() (int, error) {
 
 // in case of fetch failure it gives me back the page
 func (b *Board) Fail(page int) {
-	// double check because i'm a newbie after all
-	if b.Items[page] == false {
-		fmt.Println("SERIOSLY WTF HANPPNED HERZ???!!")
-	}
 	b.Items[page] = false
 }
 
@@ -110,7 +108,7 @@ func main() {
 	// this will become a gopher
 	pages := <-KatReady
 	fmt.Printf("pages reported from scout: %d\n", pages)
-	board := &Board{Items: make([]bool, int(pages))}
+	board := &Board{Items: make([]bool, int(16))}
 	for {
 		httpClient := <-hChannel
 		if history.Quantity > 20 {

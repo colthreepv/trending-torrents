@@ -30,17 +30,17 @@ func (t *TimedRequest) Fail(err error) *TimedRequest {
 }
 
 // struct that contains N fetches
-type FetchHistory struct {
+type RequestHistory struct {
 	h        []*TimedRequest
 	Quantity uint
 }
 
-func (f *FetchHistory) Add(singleFetch *TimedRequest) {
+func (f *RequestHistory) Add(singleFetch *TimedRequest) {
 	f.h[f.Quantity%uint(len(f.h))] = singleFetch
 	f.Quantity++
 }
 
-func (f *FetchHistory) String() string {
+func (f *RequestHistory) String() string {
 	var medianDuration time.Duration
 	for _, v := range f.h {
 		medianDuration += v.duration
@@ -49,6 +49,6 @@ func (f *FetchHistory) String() string {
 	return medianDuration.String()
 }
 
-func NewHistory(howmany int) *FetchHistory {
-	return &FetchHistory{h: make([]*TimedRequest, howmany)}
+func NewHistory(howmany int) *RequestHistory {
+	return &RequestHistory{h: make([]*TimedRequest, howmany)}
 }
