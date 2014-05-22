@@ -1,8 +1,6 @@
 package fetchers
 
 import (
-	"github.com/mrgamer/trendingtorrents/loggers"
-
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
 
@@ -105,16 +103,13 @@ func NewKatRow(n *html.Node) (k *KatRow, err error) {
 	return &KatRow{Name: name, Magnet: magnet, Size: size, Files: files, Age: age}, nil
 }
 
-func KatScout(done chan uint16, history *loggers.RequestHistory) (err error) {
-	f := loggers.NewRequest() // start a timer
+func KatScout(done chan uint16) (err error) {
 	htmlPage, err := http.Get("http://kickass.to/new/")
 	if err != nil {
-		history.Add(f.Fail(err)) // log errors to orient
 		return
 	}
 	defer htmlPage.Body.Close()
 	if htmlPage.StatusCode != http.StatusOK {
-		history.Add(f.Fail(err)) // log errors to orient
 		return errors.New(fmt.Sprintf("http returned non-OK statuscode: %d\n", htmlPage.StatusCode))
 	}
 
@@ -128,11 +123,98 @@ func KatScout(done chan uint16, history *loggers.RequestHistory) (err error) {
 	pages := cascadia.MustCompile(".turnoverButton.siteButton.bigButton:last-child").MatchFirst(parsedPage).FirstChild.Data
 	pagesParsed, err := strconv.ParseUint(pages, 10, 16)
 	if err != nil {
-		history.Add(f.Fail(err)) // log errors to orient
 		return
 	}
 
-	history.Add(f.Done())
 	done <- uint16(pagesParsed)
 	return nil
+}
+
+/**
+ * Fetcher v2 Declaration
+ *
+ * Every KatFetch contains 25 torrent rows (max)
+ * For each category, the max amout of KatFetch(ers) is 400
+ */
+type KatFetch struct {
+	startTime time.Time
+	Elapsed   time.Duration
+	Success   bool
+	Data      []*KatRow
+	Err       error
+}
+
+func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client, page uint16) {
+	k.startTime = time.Now()
+	htmlPage, err := httpClient.Get(fmt.Sprintf("http://kickass.to/new/%d", page))
+	fmt.Printf("requesting page: %s\n", fmt.Sprintf("http://kickass.to/new/%d", page))
+	if err != nil {
+		k.Fail(err, httpClient, httpChannel)
+		return
+	}
+	defer htmlPage.Body.Close()
+	if htmlPage.StatusCode != http.StatusOK {
+		k.Fail(err, httpClient, httpChannel)
+		return
+	}
+
+	// checks done, let's kaboom this HTML
+	parsedPage, err := html.Parse(htmlPage.Body)
+	if err != nil {
+		k.Fail(err, httpClient, httpChannel)
+		return
+	}
+	// create a selector for kat
+	katSelector := cascadia.MustCompile("table .odd, table .even")
+	torrentElements := katSelector.MatchAll(parsedPage)
+
+	katSlice := make([]*KatRow, len(torrentElements))
+
+	for index, element := range torrentElements {
+		katSlice[index], err = NewKatRow(element)
+		if err != nil {
+			fmt.Printf("KatRow failed: %s\n", err)
+			continue
+		}
+		// uber debug
+		// fmt.Printf("element: %v\n", katSlice[index])
+	}
+
+	k.Done(katSlice, httpClient, httpChannel)
+}
+
+func (k *KatFetch) Done(data []*KatRow, httpClient *http.Client, httpChannel chan *http.Client) {
+	k.Success = true
+	k.Data = data
+	httpChannel <- httpClient
+}
+
+// one of the possible endings for the fetch operation
+func (k *KatFetch) Fail(err error, httpClient *http.Client, httpChannel chan *http.Client) {
+	k.Elapsed = time.Now().Sub(k.startTime)
+	k.Success = false
+	k.Err = err
+	httpChannel <- httpClient
+	fmt.Printf("a fetcher failed: %s\n", err)
+}
+
+func NewKatFetch() *KatFetch {
+	return &KatFetch{Data: make([]*KatRow, 25)}
+}
+
+/**
+ * A KatFetch Collection contains ~howmany KatFetch(es)
+ */
+type KatFetchCollection struct {
+	Data   []*KatFetch
+	Length uint
+}
+
+func (k *KatFetchCollection) Add(fetch *KatFetch) {
+	k.Data[k.Length%uint(len(k.Data))] = fetch
+	k.Length++
+}
+
+func NewKatFetchCollection(howmany int) *KatFetchCollection {
+	return &KatFetchCollection{Data: make([]*KatFetch, howmany)}
 }

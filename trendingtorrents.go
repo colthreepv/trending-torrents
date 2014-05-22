@@ -99,11 +99,12 @@ func (b *Board) Fail(page int) {
 
 func main() {
 	hChannel := make(chan *http.Client)
-	history := loggers.NewHistory(10)
+	// history := loggers.NewHistory(10)
+	kCollection := fetchers.NewKatFetchCollection(10)
 	KatReady := make(chan uint16)
 
 	go createHttpChannels(4, hChannel)
-	go fetchers.KatScout(KatReady, history)
+	go fetchers.KatScout(KatReady)
 
 	// this will become a gopher
 	pages := <-KatReady
@@ -111,12 +112,19 @@ func main() {
 	board := &Board{Items: make([]bool, int(16))}
 	for {
 		httpClient := <-hChannel
-		if history.Quantity > 20 {
-			fmt.Printf("done 20 fetches, history: %s\n", history)
+		if kCollection.Length > 20 {
+			fmt.Printf("done 20 fetches, history: %s\n", kCollection)
 			break
 		}
 		// fmt.Printf("http client received, awesum: %#v\n", httpClient)
-		go fetchPage(httpClient, hChannel, history, board)
+		// go fetchPage(httpClient, hChannel, history, board)
+		page, err := board.Get()
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+		f := fetchers.NewKatFetch()
+		go f.Fetch(httpClient, hChannel, uint16(page))
 	}
 
 }
