@@ -4,6 +4,8 @@ import (
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
 
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -103,9 +105,28 @@ func NewKatRow(n *html.Node) (k *KatRow, err error) {
 	return &KatRow{Name: name, Magnet: magnet, Size: size, Files: files, Age: age}, nil
 }
 
+func getPage(url string) (*http.Response, error) {
+	i := 0
+	for {
+		htmlPage, err := http.Get(url)
+		switch {
+		case err != nil && i < 5:
+			i++
+			fmt.Println("kickass.to not responding, retrying in 5 seconds")
+			time.Sleep(5000)
+			continue
+		case err != nil && i > 5:
+			return nil, errors.New(fmt.Sprintf("too many errors, aborting the Scout: %s\n", err))
+		case err == nil:
+			return htmlPage, nil
+		}
+	}
+}
+
 func KatScout(done chan uint16) (err error) {
-	htmlPage, err := http.Get("http://kickass.to/new/")
+	htmlPage, err := getPage("http://kickass.to/new/")
 	if err != nil {
+		fmt.Println(err)
 		return
 	}
 	defer htmlPage.Body.Close()
@@ -144,7 +165,7 @@ type KatFetch struct {
 	Err       error
 }
 
-func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client, page uint16) {
+func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client, collectionChannel chan *KatFetch, page uint16) {
 	k.startTime = time.Now()
 	htmlPage, err := httpClient.Get(fmt.Sprintf("http://kickass.to/new/%d", page))
 	fmt.Printf("requesting page: %s\n", fmt.Sprintf("http://kickass.to/new/%d", page))
@@ -180,13 +201,14 @@ func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client,
 		// fmt.Printf("element: %v\n", katSlice[index])
 	}
 
-	k.Done(katSlice, httpClient, httpChannel)
+	k.Done(katSlice, httpClient, httpChannel, collectionChannel)
 }
 
-func (k *KatFetch) Done(data []*KatRow, httpClient *http.Client, httpChannel chan *http.Client) {
+func (k *KatFetch) Done(data []*KatRow, httpClient *http.Client, httpChannel chan *http.Client, collectionChannel chan *KatFetch) {
 	k.Success = true
 	k.Data = data
 	httpChannel <- httpClient
+	collectionChannel <- k
 }
 
 // one of the possible endings for the fetch operation
@@ -206,15 +228,53 @@ func NewKatFetch() *KatFetch {
  * A KatFetch Collection contains ~howmany KatFetch(es)
  */
 type KatFetchCollection struct {
-	Data   []*KatFetch
-	Length uint
+	Data    []*KatFetch
+	Length  int
+	Channel chan *KatFetch `json:"-"`
+}
+
+// ReceiveData is a function that should be called as goroutine, waiting for data to be sent
+func (k *KatFetchCollection) ReceiveData() {
+	for {
+		newFetch, ok := <-k.Channel
+		if ok == false {
+			break
+		}
+		k.Add(newFetch)
+	}
 }
 
 func (k *KatFetchCollection) Add(fetch *KatFetch) {
-	k.Data[k.Length%uint(len(k.Data))] = fetch
+	k.Data[k.Length%len(k.Data)] = fetch
 	k.Length++
 }
 
+func (k *KatFetchCollection) Done() {
+	// send data now!
+	fmt.Println("all things received, ReceiveData shutting down!")
+	close(k.Channel)
+}
+
+func (k *KatFetchCollection) MarshalJSON() ([]byte, error) {
+	dataSlice := make([][]byte, len(k.Data))
+
+	for i := 0; i < len(k.Data); i++ {
+		dataJSON, err := json.Marshal(k.Data[i])
+		if err != nil {
+			return nil, err
+		}
+		switch i {
+		case 0:
+			dataSlice[i] = append([]byte("["), dataJSON...)
+		case len(k.Data) - 1:
+			dataSlice[i] = append(dataJSON, []byte("]")...)
+		default:
+			dataSlice[i] = dataJSON
+		}
+	}
+	return bytes.Join(dataSlice, []byte(",")), nil
+}
+
 func NewKatFetchCollection(howmany int) *KatFetchCollection {
-	return &KatFetchCollection{Data: make([]*KatFetch, howmany)}
+	return &KatFetchCollection{Data: make([]*KatFetch, howmany), Channel: make(chan *KatFetch)}
 }

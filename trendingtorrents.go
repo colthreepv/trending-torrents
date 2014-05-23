@@ -7,6 +7,7 @@ import (
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
 
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -99,19 +100,36 @@ func (b *Board) Fail(page int) {
 
 func main() {
 	hChannel := make(chan *http.Client)
-	// history := loggers.NewHistory(10)
 	kCollection := fetchers.NewKatFetchCollection(10)
 	KatReady := make(chan uint16)
 
-	go createHttpChannels(4, hChannel)
+	var numChannels = 4
+
+	go createHttpChannels(numChannels, hChannel)
 	go fetchers.KatScout(KatReady)
 
 	// this will become a gopher
 	pages := <-KatReady
 	fmt.Printf("pages reported from scout: %d\n", pages)
+
+	// maybe board inside collection?
+	go kCollection.ReceiveData()
 	board := &Board{Items: make([]bool, int(16))}
+
+	// function spec
+	// func ()
 	for {
-		httpClient := <-hChannel
+		httpClient, ok := <-hChannel
+		if ok == false {
+			fmt.Println("all is done!")
+			kJSON, err := json.Marshal(kCollection)
+			if err != nil {
+				fmt.Println(err)
+			}
+			fmt.Printf("let's try to output kCollection: %s\n", kJSON)
+			break
+		}
+
 		if kCollection.Length > 20 {
 			fmt.Printf("done 20 fetches, history: %s\n", kCollection)
 			break
@@ -120,11 +138,17 @@ func main() {
 		// go fetchPage(httpClient, hChannel, history, board)
 		page, err := board.Get()
 		if err != nil {
+			// in case the pages are ended, we throw away the client
 			fmt.Println(err)
-			break
+			if numChannels--; numChannels == 0 {
+				// signal that all is done
+				kCollection.Done()
+				close(hChannel)
+			}
+			continue
 		}
 		f := fetchers.NewKatFetch()
-		go f.Fetch(httpClient, hChannel, uint16(page))
+		go f.Fetch(httpClient, hChannel, kCollection.Channel, uint16(page))
 	}
 
 }
