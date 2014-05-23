@@ -105,7 +105,7 @@ func NewKatRow(n *html.Node) (k *KatRow, err error) {
 	return &KatRow{Name: name, Magnet: magnet, Size: size, Files: files, Age: age}, nil
 }
 
-func getPage(url string) (*http.Response, error) {
+func fetchWithRetry(url string) (*http.Response, error) {
 	i := 0
 	for {
 		htmlPage, err := http.Get(url)
@@ -124,7 +124,7 @@ func getPage(url string) (*http.Response, error) {
 }
 
 func KatScout(done chan uint16) (err error) {
-	htmlPage, err := getPage("http://kickass.to/new/")
+	htmlPage, err := fetchWithRetry("http://kickass.to/new/")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -165,24 +165,38 @@ type KatFetch struct {
 	Err       error
 }
 
-func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client, collectionChannel chan *KatFetch, page uint16) {
+func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client, collection *KatFetchCollection) {
+	page, err := collection.GetPage()
+	if err != nil {
+		if collection.ActiveFetchers == 0 {
+			close(httpChannel)
+		}
+		// waste the http.Client here, since we're done!
+		return
+	}
+
 	k.startTime = time.Now()
 	htmlPage, err := httpClient.Get(fmt.Sprintf("http://kickass.to/new/%d", page))
 	fmt.Printf("requesting page: %s\n", fmt.Sprintf("http://kickass.to/new/%d", page))
 	if err != nil {
-		k.Fail(err, httpClient, httpChannel)
+		k.Fail(err, httpClient, httpChannel, collection, page)
 		return
 	}
 	defer htmlPage.Body.Close()
 	if htmlPage.StatusCode != http.StatusOK {
-		k.Fail(err, httpClient, httpChannel)
+		k.Fail(
+			errors.New(fmt.Sprintf("unexpected statusCode: %d instead of 200", htmlPage.StatusCode)),
+			httpClient,
+			httpChannel,
+			collection,
+			page)
 		return
 	}
 
 	// checks done, let's kaboom this HTML
 	parsedPage, err := html.Parse(htmlPage.Body)
 	if err != nil {
-		k.Fail(err, httpClient, httpChannel)
+		k.Fail(err, httpClient, httpChannel, collection, page)
 		return
 	}
 	// create a selector for kat
@@ -201,21 +215,24 @@ func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client,
 		// fmt.Printf("element: %v\n", katSlice[index])
 	}
 
-	k.Done(katSlice, httpClient, httpChannel, collectionChannel)
+	k.Done(katSlice, httpClient, httpChannel, collection)
 }
 
-func (k *KatFetch) Done(data []*KatRow, httpClient *http.Client, httpChannel chan *http.Client, collectionChannel chan *KatFetch) {
+func (k *KatFetch) Done(data []*KatRow, httpClient *http.Client, httpChannel chan *http.Client, collection *KatFetchCollection) {
+	k.Elapsed = time.Now().Sub(k.startTime)
 	k.Success = true
 	k.Data = data
+	collection.Completed <- k
 	httpChannel <- httpClient
-	collectionChannel <- k
 }
 
 // one of the possible endings for the fetch operation
-func (k *KatFetch) Fail(err error, httpClient *http.Client, httpChannel chan *http.Client) {
+func (k *KatFetch) Fail(err error, httpClient *http.Client, httpChannel chan *http.Client, collection *KatFetchCollection, page int) {
 	k.Elapsed = time.Now().Sub(k.startTime)
 	k.Success = false
 	k.Err = err
+	collection.ReturnPage(page)
+	collection.Completed <- k
 	httpChannel <- httpClient
 	fmt.Printf("a fetcher failed: %s\n", err)
 }
@@ -228,31 +245,56 @@ func NewKatFetch() *KatFetch {
  * A KatFetch Collection contains ~howmany KatFetch(es)
  */
 type KatFetchCollection struct {
-	Data    []*KatFetch
-	Length  int
-	Channel chan *KatFetch `json:"-"`
+	ActiveFetchers int
+	Current        int
+
+	Data     []*KatFetch
+	Failures []*KatFetch
+
+	Completed chan *KatFetch
+
+	Board []bool
 }
 
 // ReceiveData is a function that should be called as goroutine, waiting for data to be sent
 func (k *KatFetchCollection) ReceiveData() {
 	for {
-		newFetch, ok := <-k.Channel
+		newFetch, ok := <-k.Completed
 		if ok == false {
 			break
 		}
-		k.Add(newFetch)
+		switch newFetch.Success {
+		case true:
+			if err := k.Success(newFetch); err != nil {
+				fmt.Println(err)
+				close(k.Completed)
+				break
+			}
+		case false:
+			k.Fail(newFetch)
+		}
 	}
 }
 
-func (k *KatFetchCollection) Add(fetch *KatFetch) {
-	k.Data[k.Length%len(k.Data)] = fetch
-	k.Length++
+func (k *KatFetchCollection) Success(fetch *KatFetch) error {
+	if k.Current == len(k.Data) {
+		return errors.New(fmt.Sprintf("added too many fetches to a collection long only: %d\n", k.Current))
+	}
+	k.Data[k.Current] = fetch
+	k.Current++
+	k.ActiveFetchers--
+	fmt.Printf("active fetchers: %d\n", k.ActiveFetchers)
+	return nil
+}
+
+func (k *KatFetchCollection) Fail(fetch *KatFetch) {
+	k.Failures = append(k.Failures, fetch)
 }
 
 func (k *KatFetchCollection) Done() {
-	// send data now!
+	// send k.Data to couchDB now!
 	fmt.Println("all things received, ReceiveData shutting down!")
-	close(k.Channel)
+	close(k.Completed)
 }
 
 func (k *KatFetchCollection) MarshalJSON() ([]byte, error) {
@@ -275,6 +317,28 @@ func (k *KatFetchCollection) MarshalJSON() ([]byte, error) {
 	return bytes.Join(dataSlice, []byte(",")), nil
 }
 
+func (k *KatFetchCollection) GetPage() (int, error) {
+	for i, _ := range k.Board {
+		if k.Board[i] == false {
+			k.Board[i] = true
+			k.ActiveFetchers++
+			fmt.Printf("active fetchers: %d\n", k.ActiveFetchers)
+			return i + 1, nil
+		}
+	}
+	return 0, errors.New("board empty")
+}
+
+func (k *KatFetchCollection) ReturnPage(page int) {
+	k.Board[page] = false
+	k.ActiveFetchers--
+}
+
 func NewKatFetchCollection(howmany int) *KatFetchCollection {
-	return &KatFetchCollection{Data: make([]*KatFetch, howmany), Channel: make(chan *KatFetch)}
+	return &KatFetchCollection{
+		Data:      make([]*KatFetch, howmany),
+		Completed: make(chan *KatFetch),
+		Board:     make([]bool, howmany),
+		Failures:  make([]*KatFetch, 0),
+	}
 }

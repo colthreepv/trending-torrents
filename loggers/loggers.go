@@ -29,6 +29,10 @@ func (t *TimedRequest) Fail(err error) *TimedRequest {
 	return t
 }
 
+func (t *TimedRequest) String() string {
+	return fmt.Sprint(t.duration)
+}
+
 // struct that contains N fetches
 type RequestHistory struct {
 	h        []*TimedRequest
