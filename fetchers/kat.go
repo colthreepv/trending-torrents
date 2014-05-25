@@ -4,7 +4,7 @@ import (
 	"code.google.com/p/cascadia"
 	"code.google.com/p/go.net/html"
 
-	"bytes"
+	// "bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -158,11 +158,11 @@ func KatScout(done chan uint16) (err error) {
  * For each category, the max amout of KatFetch(ers) is 400
  */
 type KatFetch struct {
-	startTime time.Time
+	StartTime time.Time
 	Elapsed   time.Duration
-	Success   bool
+	success   bool `json:"-"`
 	Data      []*KatRow
-	Err       error
+	fetchErr  error `json:"-"`
 }
 
 func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client, collection *KatFetchCollection) {
@@ -175,7 +175,7 @@ func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client,
 		return
 	}
 
-	k.startTime = time.Now()
+	k.StartTime = time.Now()
 	htmlPage, err := httpClient.Get(fmt.Sprintf("http://kickass.to/new/%d", page))
 	fmt.Printf("requesting page: %s\n", fmt.Sprintf("http://kickass.to/new/%d", page))
 	if err != nil {
@@ -219,8 +219,8 @@ func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client,
 }
 
 func (k *KatFetch) Done(data []*KatRow, httpClient *http.Client, httpChannel chan *http.Client, collection *KatFetchCollection) {
-	k.Elapsed = time.Now().Sub(k.startTime)
-	k.Success = true
+	k.Elapsed = time.Now().Sub(k.StartTime)
+	k.success = true
 	k.Data = data
 	collection.Completed <- k
 	httpChannel <- httpClient
@@ -228,9 +228,9 @@ func (k *KatFetch) Done(data []*KatRow, httpClient *http.Client, httpChannel cha
 
 // one of the possible endings for the fetch operation
 func (k *KatFetch) Fail(err error, httpClient *http.Client, httpChannel chan *http.Client, collection *KatFetchCollection, page int) {
-	k.Elapsed = time.Now().Sub(k.startTime)
-	k.Success = false
-	k.Err = err
+	k.Elapsed = time.Now().Sub(k.StartTime)
+	k.success = false
+	k.fetchErr = err
 	collection.ReturnPage(page)
 	collection.Completed <- k
 	httpChannel <- httpClient
@@ -242,18 +242,34 @@ func NewKatFetch() *KatFetch {
 }
 
 /**
+ * structure to export a KatFetchCollection for CouchDB
+ */
+type bulkExport struct {
+	Docs []*KatFetch `json:"docs"`
+}
+
+/**
  * A KatFetch Collection contains ~howmany KatFetch(es)
  */
 type KatFetchCollection struct {
-	ActiveFetchers int
-	Current        int
+	ActiveFetchers int `json:"-"`
+	Current        int `json:"-"`
 
-	Data     []*KatFetch
-	Failures []*KatFetch
+	Data     []*KatFetch `json:"successFetch"`
+	Failures []*KatFetch `json:"failedFetch"`
 
-	Completed chan *KatFetch
+	Completed chan *KatFetch `json:"-"`
 
-	Board []bool
+	Board []bool `json:"-"`
+}
+
+func NewKatFetchCollection(howmany int) *KatFetchCollection {
+	return &KatFetchCollection{
+		Data:      make([]*KatFetch, howmany),
+		Completed: make(chan *KatFetch),
+		Board:     make([]bool, howmany),
+		Failures:  make([]*KatFetch, 0),
+	}
 }
 
 // ReceiveData is a function that should be called as goroutine, waiting for data to be sent
@@ -263,7 +279,7 @@ func (k *KatFetchCollection) ReceiveData() {
 		if ok == false {
 			break
 		}
-		switch newFetch.Success {
+		switch newFetch.success {
 		case true:
 			if err := k.Success(newFetch); err != nil {
 				fmt.Println(err)
@@ -271,7 +287,7 @@ func (k *KatFetchCollection) ReceiveData() {
 				break
 			}
 		case false:
-			k.Fail(newFetch)
+			k.Failure(newFetch)
 		}
 	}
 }
@@ -287,7 +303,7 @@ func (k *KatFetchCollection) Success(fetch *KatFetch) error {
 	return nil
 }
 
-func (k *KatFetchCollection) Fail(fetch *KatFetch) {
+func (k *KatFetchCollection) Failure(fetch *KatFetch) {
 	k.Failures = append(k.Failures, fetch)
 }
 
@@ -295,26 +311,6 @@ func (k *KatFetchCollection) Done() {
 	// send k.Data to couchDB now!
 	fmt.Println("all things received, ReceiveData shutting down!")
 	close(k.Completed)
-}
-
-func (k *KatFetchCollection) MarshalJSON() ([]byte, error) {
-	dataSlice := make([][]byte, len(k.Data))
-
-	for i := 0; i < len(k.Data); i++ {
-		dataJSON, err := json.Marshal(k.Data[i])
-		if err != nil {
-			return nil, err
-		}
-		switch i {
-		case 0:
-			dataSlice[i] = append([]byte("["), dataJSON...)
-		case len(k.Data) - 1:
-			dataSlice[i] = append(dataJSON, []byte("]")...)
-		default:
-			dataSlice[i] = dataJSON
-		}
-	}
-	return bytes.Join(dataSlice, []byte(",")), nil
 }
 
 func (k *KatFetchCollection) GetPage() (int, error) {
@@ -334,11 +330,12 @@ func (k *KatFetchCollection) ReturnPage(page int) {
 	k.ActiveFetchers--
 }
 
-func NewKatFetchCollection(howmany int) *KatFetchCollection {
-	return &KatFetchCollection{
-		Data:      make([]*KatFetch, howmany),
-		Completed: make(chan *KatFetch),
-		Board:     make([]bool, howmany),
-		Failures:  make([]*KatFetch, 0),
-	}
+func (k *KatFetchCollection) ExportSuccess() ([]byte, error) {
+	docs := &bulkExport{Docs: k.Data}
+	return json.Marshal(docs)
+}
+
+func (k *KatFetchCollection) ExportFailure() ([]byte, error) {
+	docs := &bulkExport{Docs: k.Data}
+	return json.Marshal(docs)
 }
