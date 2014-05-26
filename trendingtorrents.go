@@ -4,8 +4,9 @@ import (
 	"github.com/mrgamer/trendingtorrents/fetchers"
 	"github.com/mrgamer/trendingtorrents/loggers"
 
+	"bytes"
 	"fmt"
-	"io/ioutil"
+	_ "io/ioutil"
 	"net/http"
 	"time"
 )
@@ -36,7 +37,7 @@ func main() {
 	// this will become a gopher
 	pages := <-KatReady
 	fmt.Printf("pages reported from scout: %d\n", pages)
-	kCollection := fetchers.NewKatFetchCollection(int(2))
+	kCollection := fetchers.NewKatFetchCollection(int(100))
 
 	go kCollection.ReceiveData()
 	// maybe board inside collection?
@@ -48,11 +49,17 @@ func main() {
 		httpClient, ok := <-hChannel
 		if ok == false {
 			fmt.Println("all is done!")
-			kJSON, err := kCollection.ExportSuccess()
+			kJson, err := kCollection.ExportSuccess()
 			if err != nil {
 				fmt.Println(err)
 			}
-			err = ioutil.WriteFile("katfetch.json", kJSON, 0644)
+			kJsonReader := bytes.NewReader(kJson)
+			couchResponse, err := http.Post("http://localhost:5984/trendingtorrents/_bulk_docs", "application/json", kJsonReader)
+			couchResponse.Body.Close()
+			if err != nil {
+				fmt.Println(err)
+			}
+			// err = ioutil.WriteFile("katfetch.json", kJSON, 0644)
 			if err != nil {
 				fmt.Println(err)
 			}
