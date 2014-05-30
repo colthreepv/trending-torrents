@@ -1,0 +1,35 @@
+{
+  "name": "trendingtorrents",
+  "version": "0.0.0",
+  "description": "prototype of a data analyzing platform tracking torrents",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/mrgamer/trending-torrents.git"
+  },
+  "keywords": [
+    "torrent",
+    "magnet",
+    "analysis",
+    "dom",
+    "manipulation",
+    "service",
+    "daemon"
+  ],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mrgamer/trending-torrents/issues"
+  },
+  "homepage": "https://github.com/mrgamer/trending-torrents",
+  "dependencies": {
+    "parse5": "^0.8.3",
+    "request": "^2.36.0",
+    "cheerio": "^0.16.0",
+    "async": "^0.9.0",
+    "extend": "^1.2.1"
+  }
+}
