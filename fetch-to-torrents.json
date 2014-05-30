@@ -1,0 +1,38 @@
+{
+	"language": "javascript",
+  "views": {
+    "getFetches": {
+      "map": "function (doc) {
+        if (doc.fetched) {
+          emit()
+        }
+      }"
+    }
+  },
+  "lists": {
+    "listFetches": "function (head, req) {
+      log(['printing ', head.total_rows, ' rows']);
+      start({
+        'headers': {
+          'Content-Type': 'application/json'
+        }
+      });
+      send('[');
+      var row;
+      for (var i = 1; i < head.total_rows; i++) {
+        row = getRow();
+        send(toJSON(row.id) + ',');
+      }
+      row = getRow();
+      send(toJSON(row.id));
+      send(']');
+    }"
+  },
+	"updates": {
+    "convert": "function (doc, req) {
+      log(['doc', doc]);
+      log(['req', req]);
+      return [null, null];
+    }"
+  }
+}

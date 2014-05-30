@@ -15,11 +15,11 @@ import (
 )
 
 type KatRow struct {
-	Name   string
-	Magnet string
-	Size   uint64
-	Files  uint64
-	Age    *time.Time
+	Name   string     `json:"name"`
+	Magnet string     `json:"magnet"`
+	Size   uint64     `json:"size"`
+	Files  uint64     `json:"files"`
+	Age    *time.Time `json:"age"`
 }
 
 func parseSize(amount float32, qty string) (uint64, error) {
@@ -158,11 +158,12 @@ func KatScout(done chan uint16) (err error) {
  * For each category, the max amout of KatFetch(ers) is 400
  */
 type KatFetch struct {
-	StartTime time.Time
-	Elapsed   time.Duration
-	success   bool `json:"-"`
-	Data      []*KatRow
-	fetchErr  error `json:"-"`
+	StartTime time.Time     `json:"startTime"`
+	Elapsed   time.Duration `json:"elapsed"`
+	Fetched   bool          `json:"fetched"`
+	success   bool          `json:"-"`
+	Data      []*KatRow     `json:"data"`
+	fetchErr  error         `json:"-"`
 }
 
 func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client, collection *KatFetchCollection) {
@@ -238,7 +239,7 @@ func (k *KatFetch) Fail(err error, httpClient *http.Client, httpChannel chan *ht
 }
 
 func NewKatFetch() *KatFetch {
-	return &KatFetch{Data: make([]*KatRow, 25)}
+	return &KatFetch{Data: make([]*KatRow, 25), Fetched: true}
 }
 
 /**

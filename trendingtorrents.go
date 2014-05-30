@@ -5,6 +5,7 @@ import (
 	"github.com/mrgamer/trendingtorrents/loggers"
 
 	"bytes"
+	"encoding/json"
 	"fmt"
 	_ "io/ioutil"
 	"net/http"
