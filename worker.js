@@ -37,7 +37,8 @@ function parseAge (timeAgo) {
     case 'min.':
       timeNow = timeNow - (numericTime * 60 * 1000);
       break;
-    case 'hour', 'hours':
+    case 'hour':
+    case 'hours':
       timeNow = timeNow - (numericTime * 60 * 60 * 1000);
       break;
     case 'day':
@@ -55,7 +56,7 @@ function parseAge (timeAgo) {
 }
 
 function KatFetch() {
-  this.startTime = null;
+  this.startTime = Date.now();
   this.elapsed  = null;
   this.data = [];
 }
@@ -84,8 +85,9 @@ KatFetch.prototype.fetch = function (url, callback) {
       self.data[index] = rowData;
     });
 
+    // write elapsed time
+    self.elapsed = Date.now() - self.startTime;
     callback(null, self);
-
   });
 };
 

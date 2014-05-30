@@ -1,6 +1,7 @@
 // node api
 var cluster = require('cluster'),
-    numCpu = require('os').cpus().length;
+    numCpu = require('os').cpus().length,
+    fs = require('fs');
 
 // libs
 var gzipRequest = require('./lib/gzip-request.js');
@@ -34,7 +35,7 @@ function KatFetchCollection (howmany) {
 
   this.activeFetchers = 0;
   this.current = 0;
-  this.data = {};
+  this.data = [];
   this.failures = {};
   this.board = board;
 }
@@ -50,8 +51,16 @@ KatFetchCollection.prototype.getPage = function () {
   return null;
 };
 
+KatFetchCollection.prototype.success = function (data) {
+  this.data.push(data);
+  this.activeFetchers--;
+};
+
 // KatScout.
-gzipRequest('http://kickass.to/new/', function (err, body) {
+gzipRequest({
+  url:'http://kickass.to/new/',
+  timeout: 60 * 1000
+}, function (err, body) {
   if (err) {
     return console.log('KatScout failed:', err);
   }
@@ -65,10 +74,10 @@ gzipRequest('http://kickass.to/new/', function (err, body) {
 
   // processing
   var workers = numCpu,
-      fetchCollection = new KatFetchCollection(pagesParsed);
+      fetchCollection = new KatFetchCollection(20);
 
   // done, we start workers now.
-  async.whilst(function testWhilst() {
+  async.whilst(function testWhilst() { // OLOLOL, i don't have to use whilst, but .queue :(
     return workers > 0;
   }, function fn (callback) {
     var pageToFetch;
@@ -77,14 +86,26 @@ gzipRequest('http://kickass.to/new/', function (err, body) {
       return callback();
     }
 
-
+    // dispatch work to a worker
     workersArr[workers - 1].send({
       url: 'http://kickass.to/new/' + pageToFetch + '/'
     });
-    // workersArr[workers - 1].once('message', function (msg) {
-    //   console.log('received data back from worker:', msg);
-    // });
-  }, function (err) {
 
+    // and listen once for completion
+    workersArr[workers - 1].once('message', function (msg) {
+      if (msg.data) {
+        fetchCollection.success(msg.data);
+        return callback();
+      } else {
+        return callback('no data received for page:' + pageToFetch);
+      }
+    });
+  }, function (err) {
+    if (err) {
+      return console.log(err);
+    }
+
+    console.log('fetching done!');
+    fs.writeFileSync('node-data.js', JSON.stringify(fetchCollection));
   });
 });
