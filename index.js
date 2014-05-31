@@ -4,7 +4,8 @@ var cluster = require('cluster'),
     fs = require('fs');
 
 // libs
-var gzipRequest = require('./lib/gzip-request.js');
+var gzipRequest = require('./lib/gzip-request.js'),
+    kat = require('./lib/kat');
 
 // external deps
 var cheerio = require('cheerio'),
@@ -17,50 +18,20 @@ cluster.setupMaster({
 });
 var workersArr = [];
 for (var i = 0; i < numCpu; i++) {
-  workersArr.push(cluster.fork());
+  cluster.fork();
 }
 
 // listen in case of child death, debugging reasons only.. for now
-workersArr.forEach(function (worker) {
+Array.prototype.forEach.call(cluster.workers, function (worker) {
   worker.on('exit', function (code, signal) {
     console.log('a child exited with code:', code, 'and signal', signal);
   });
 });
 
-function KatFetchCollection (howmany) {
-  var board = [];
-  for (var i = 0; i < howmany; i++) {
-    board[i] = false;
-  }
-
-  this.activeFetchers = 0;
-  this.current = 0;
-  this.data = [];
-  this.failures = {};
-  this.board = board;
-}
-
-KatFetchCollection.prototype.getPage = function () {
-  var freePage;
-  if (freePage = this.board.indexOf(false), freePage !== -1) {
-    this.board[freePage] = true;
-    this.activeFetchers++;
-    console.log('active fetchers:', this.activeFetchers);
-    return freePage + 1;
-  }
-  return null;
-};
-
-KatFetchCollection.prototype.success = function (data) {
-  this.data.push(data);
-  this.activeFetchers--;
-};
-
-// KatScout.
-gzipRequest({
-  url:'http://kickass.to/new/',
-  timeout: 60 * 1000
-}, function (err, body) {
+// KatScout with retry
+async.retry(function (callback, results) {
+  gzipRequest('http://kickass.to/new/', callback);
+}, function scoutDone (err, body) {
   if (err) {
     return console.log('KatScout failed:', err);
   }
@@ -74,7 +45,7 @@ gzipRequest({
 
   // processing
   var workers = numCpu,
-      fetchCollection = new KatFetchCollection(20);
+      fetchCollection = new kat.KatFetchCollection(20);
 
   // done, we start workers now.
   async.whilst(function testWhilst() { // OLOLOL, i don't have to use whilst, but .queue :(
@@ -87,12 +58,12 @@ gzipRequest({
     }
 
     // dispatch work to a worker
-    workersArr[workers - 1].send({
+    cluster.workers[workers - 1].send({
       url: 'http://kickass.to/new/' + pageToFetch + '/'
     });
 
     // and listen once for completion
-    workersArr[workers - 1].once('message', function (msg) {
+    cluster.workers[workers - 1].once('message', function (msg) {
       if (msg.data) {
         fetchCollection.success(msg.data);
         return callback();
