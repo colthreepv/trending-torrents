@@ -12,6 +12,8 @@ var cheerio = require('cheerio'),
     async = require('async'),
     extend = require('extend');
 
+console.time('All done in');
+
 // setup the code to execute to worker.js
 cluster.setupMaster({
   exec: 'worker.js'
@@ -116,7 +118,8 @@ async.retry(function (callback, results) {
 
   f.on('done', function () {
     console.log('active processes reached 0, we should have done it');
-    fs.writeFileSync('katfetch1.json', JSON.stringify(this.data));
+    fs.writeFileSync('katfetch.json', JSON.stringify(this.data));
+    console.timeEnd('All done in');
     process.exit();
   });
 });
