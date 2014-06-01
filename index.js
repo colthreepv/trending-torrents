@@ -1,3 +1,5 @@
+// TODO: give to workers more than 1 page to fetch, see how it performs.
+
 // node api
 var cluster = require('cluster'),
     numCpu = require('os').cpus().length,
