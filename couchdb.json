@@ -1,0 +1,63 @@
+{
+  "language": "javascript",
+  "views": {
+    "getFetches": {
+      "map": "function (doc) {
+        if (doc.data) {
+          emit()
+        }
+      }"
+    },
+    "getTorrentsFromFetches": {
+      "map": "function (doc) {
+        if (doc.data) {
+          doc.data.forEach(function (torrent, index) {
+            emit(index, torrent);
+          });
+        }
+      }"
+    }
+  },
+  "lists": {
+    "listFetches": "function (head, req) {
+      log(['printing ', head.total_rows, ' rows']);
+      start({
+        'headers': {
+          'Content-Type': 'application/json'
+        }
+      });
+      send('[');
+      var row;
+      for (var i = 1; i < head.total_rows; i++) {
+        row = getRow();
+        send(toJSON(row.id) + ',');
+      }
+      row = getRow();
+      send(toJSON(row.id));
+      send(']');
+    }",
+    "listTorrentsInsideFetches": "function (head, req) {
+      start({
+        'headers': {
+          'Content-Type': 'application/json'
+        }
+      });
+      send('[');
+      for (var i = 1; i < head.total_rows; i++) {
+        row = getRow();
+        log(['what the hell is row:', row]);
+        row.data.forEach(function (torrent, index) {
+          send(toJSON(torrent) + ',');
+        });
+      }
+      send(']');
+    }"
+  },
+  "updates": {
+    "convert": "function (doc, req) {
+      log(['doc', doc]);
+      log(['req', req]);
+      return [null, null];
+    }"
+  }
+}
