@@ -85,11 +85,10 @@ async.retry(function (callback, results) {
         throw err;
       }
 
-      console.log('couchDB response:', resp);
+      console.log('couchDB response:', resp.statusCode);
       console.timeEnd('All done in');
       process.exit();
     });
-    // fs.writeFileSync('katfetch.json', JSON.stringify(this.data));
   });
 
 });

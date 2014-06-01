@@ -9,6 +9,7 @@ var gzipRequest = require('./lib/gzip-request.js'),
 
 // external deps
 var cheerio = require('cheerio'),
+    request = require('request'),
     async = require('async'),
     extend = require('extend');
 
@@ -22,6 +23,11 @@ var workersArr = [];
 for (var i = 0; i < numCpu; i++) {
   workersArr[i] = cluster.fork();
 }
+
+var couchDB = {
+  url: 'http://localhost:5984/',
+  db: 'trendingtorrents'
+};
 
 // listen in case of child death, debugging reasons only.. for now
 workersArr.forEach(function (worker) {
@@ -117,9 +123,20 @@ async.retry(function (callback, results) {
   }
 
   f.on('done', function () {
-    console.log('active processes reached 0, we should have done it');
-    fs.writeFileSync('katfetch.json', JSON.stringify(this.data));
-    console.timeEnd('All done in');
-    process.exit();
+    console.log('all is done!');
+    request.post({
+      url: couchDB.url + couchDB.db + '/' + '_bulk_docs',
+      json: {
+        docs: this.data
+      }
+    }, function (err, resp, body) {
+      if (err) {
+        throw err;
+      }
+
+      console.log('couchDB response:', resp.statusCode);
+      console.timeEnd('All done in');
+      process.exit();
+    });
   });
 });
