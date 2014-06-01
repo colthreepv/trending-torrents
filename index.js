@@ -18,11 +18,11 @@ cluster.setupMaster({
 });
 var workersArr = [];
 for (var i = 0; i < numCpu; i++) {
-  cluster.fork();
+  workersArr[i] = cluster.fork();
 }
 
 // listen in case of child death, debugging reasons only.. for now
-Array.prototype.forEach.call(cluster.workers, function (worker) {
+workersArr.forEach(function (worker) {
   worker.on('exit', function (code, signal) {
     console.log('a child exited with code:', code, 'and signal', signal);
   });
@@ -30,7 +30,7 @@ Array.prototype.forEach.call(cluster.workers, function (worker) {
 
 // KatScout with retry
 async.retry(function (callback, results) {
-  gzipRequest('http://kickass.to/new/', callback);
+  gzipRequest('http://kat.col3.me/new/', callback);
 }, function scoutDone (err, body) {
   if (err) {
     return console.log('KatScout failed:', err);
@@ -44,39 +44,79 @@ async.retry(function (callback, results) {
 
 
   // processing
-  var workers = numCpu,
-      fetchCollection = new kat.KatFetchCollection(20);
+  var workersWorking = [],
+      f = new kat.KatFetchCollection(100);
 
-  // done, we start workers now.
-  async.whilst(function testWhilst() { // OLOLOL, i don't have to use whilst, but .queue :(
-    return workers > 0;
-  }, function fn (callback) {
-    var pageToFetch;
-    // in case the pages to fetch are ended, we call callback immediately
-    if (pageToFetch = fetchCollection.getPage(), !pageToFetch) {
-      return callback();
+  // init the workers
+  for (var i = 0; i < workersArr.length; i++) {
+    workersWorking[i] = false;
+  }
+
+  // done, prepare queue executor
+  var workersQ = async.queue(function worker (task, callback) {
+    // task has 2 keys: page, workerId
+    if (task.workerId === -1) {
+      console.log('this is gonna crash', workersWorking);
     }
 
     // dispatch work to a worker
-    cluster.workers[workers - 1].send({
-      url: 'http://kickass.to/new/' + pageToFetch + '/'
+    workersArr[task.workerId].send({
+      url: 'http://kat.col3.me/new/' + task.page + '/',
+      page: task.page,
+      worker: task.workerId
     });
 
     // and listen once for completion
-    cluster.workers[workers - 1].once('message', function (msg) {
+    workersArr[task.workerId].once('message', function (msg) {
       if (msg.data) {
-        fetchCollection.success(msg.data);
+        f.success(msg.data);
         return callback();
       } else {
-        return callback('no data received for page:' + pageToFetch);
+        return callback('no data received for page: ' + task.page);
       }
     });
-  }, function (err) {
-    if (err) {
-      return console.log(err);
-    }
+  }, workersArr.length);
 
-    console.log('fetching done!');
-    fs.writeFileSync('node-data.js', JSON.stringify(fetchCollection));
+  function createWorkerCallback() {
+    var selectedWorker;
+    // finds the first idling worker if it's not the first time the fn gets called
+    if (selectedWorker = workersWorking.indexOf(false), selectedWorker == -1) {
+      console.log('bad! i have called createWorkerClosure without an idle worker!!!');
+      return process.exit();
+    }
+    workersWorking[selectedWorker] = true;
+    return function workDone (err) {
+      if (err) {
+        console.log(
+          'some error happened processing page',
+          pageToFetch,
+          'i will requeue it, i am worker number',
+          selectedWorker
+        );
+      }
+      workersWorking[selectedWorker] = false;
+
+      var pageToFetch;
+      if (pageToFetch = f.getPage(), pageToFetch) {
+        workersQ.push({
+          page: pageToFetch,
+          workerId: selectedWorker
+        }, createWorkerCallback());
+      }
+    };
+  }
+
+  // bootstrap workers
+  for (i = 0; i < workersArr.length; i++) {
+    workersQ.push({
+      page: f.getPage(),
+      workerId: i
+    }, createWorkerCallback());
+  }
+
+  f.on('done', function () {
+    console.log('active processes reached 0, we should have done it');
+    fs.writeFileSync('katfetch1.json', JSON.stringify(this.data));
+    process.exit();
   });
 });

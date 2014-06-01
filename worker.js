@@ -21,5 +21,10 @@ process.on('message', function (msg) {
     var singleFetch = new kat.KatFetch();
     singleFetch.fetch(msg.url, sendDataBack);
   }
-  console.log('dumping the message:', msg);
+  console.log(
+    'worker:',
+    msg.worker,
+    'fetching page:',
+    msg.page
+  );
 });
