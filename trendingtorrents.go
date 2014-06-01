@@ -5,10 +5,9 @@ import (
 	"github.com/mrgamer/trendingtorrents/loggers"
 
 	"bytes"
-	"encoding/json"
 	"fmt"
-	_ "io/ioutil"
 	"net/http"
+	"runtime"
 	"time"
 )
 
@@ -32,7 +31,7 @@ func main() {
 	hChannel := make(chan *http.Client)
 	KatReady := make(chan uint16)
 
-	go createHttpChannels(4, hChannel)
+	go createHttpChannels(runtime.NumCPU(), hChannel)
 	go fetchers.KatScout(KatReady)
 
 	// this will become a gopher
