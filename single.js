@@ -29,7 +29,7 @@ async.retry(function (callback, results) {
 
   var jq = cheerio.load(body);
   var pagesParsed = parseInt(jq('.turnoverButton.siteButton.bigButton:last-child').text(), 10);
-  pagesParsed = 100;
+  // pagesParsed = 100;
   var f = new kat.KatFetchCollection(pagesParsed);
 
   // task has 1 key: page

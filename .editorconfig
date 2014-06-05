@@ -1,0 +1,17 @@
+# EditorConfig is awesome: http://editorconfig.org/
+# Please, read it!
+ 
+# top-most EditorConfig file
+root = true
+ 
+# Unix-style newlines with a newline ending every file
+[*.js, *.json]
+end_of_line = lf
+insert_final_newline = true
+charset = utf8
+indent_style = space
+indent_size = 2
+ 
+# Markdown make use of trailing whitespace, don't trim it!
+[*.md]
+trim_trailing_whitespace = false
