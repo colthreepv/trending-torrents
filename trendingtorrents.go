@@ -4,9 +4,9 @@ import (
 	"github.com/mrgamer/trendingtorrents/fetchers"
 	"github.com/mrgamer/trendingtorrents/loggers"
 
-	"bytes"
+	// "bytes"
 	"fmt"
-	_ "io/ioutil"
+	"io/ioutil"
 	"net/http"
 	"time"
 )
@@ -31,7 +31,7 @@ func main() {
 	hChannel := make(chan *http.Client)
 	KatReady := make(chan uint16)
 
-	go createHttpChannels(4, hChannel)
+	go createHttpChannels(10, hChannel)
 	go fetchers.KatScout(KatReady)
 
 	// this will become a gopher
@@ -49,17 +49,17 @@ func main() {
 		httpClient, ok := <-hChannel
 		if ok == false {
 			fmt.Println("all is done!")
-			kJson, err := kCollection.ExportSuccess()
+			kJSON, err := kCollection.ExportSuccess()
 			if err != nil {
 				fmt.Println(err)
 			}
-			kJsonReader := bytes.NewReader(kJson)
-			couchResponse, err := http.Post("http://localhost:5984/trendingtorrents/_bulk_docs", "application/json", kJsonReader)
-			couchResponse.Body.Close()
-			if err != nil {
-				fmt.Println(err)
-			}
-			// err = ioutil.WriteFile("katfetch.json", kJSON, 0644)
+			// kJsonReader := bytes.NewReader(kJson)
+			// // couchResponse, err := http.Post("http://localhost:5984/trendingtorrents/_bulk_docs", "application/json", kJsonReader)
+			// // couchResponse.Body.Close()
+			// // if err != nil {
+			// // 	fmt.Println(err)
+			// // }
+			err = ioutil.WriteFile("katfetch.json", kJSON, 0644)
 			if err != nil {
 				fmt.Println(err)
 			}

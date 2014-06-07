@@ -1,8 +1,7 @@
 package fetchers
 
 import (
-	"code.google.com/p/cascadia"
-	"code.google.com/p/go.net/html"
+	"github.com/PuerkitoBio/goquery"
 
 	// "bytes"
 	"encoding/json"
@@ -22,8 +21,15 @@ type KatRow struct {
 	Age    *time.Time
 }
 
-func parseSize(amount float32, qty string) (uint64, error) {
-	switch qty {
+// helper function for NewKatPage
+func parseSize(qty string) (uint64, error) {
+	splitSize := strings.Fields(qty)
+	amount, err := strconv.ParseFloat(strings.TrimSpace(splitSize[0]), 64)
+	if err != nil {
+		return 0, err
+	}
+
+	switch splitSize[1] {
 	case "bytes":
 		return uint64(amount), nil
 	case "KB":
@@ -37,6 +43,7 @@ func parseSize(amount float32, qty string) (uint64, error) {
 	}
 }
 
+// helper function for NewKatPage
 func parseAge(timeAgo string) (*time.Time, error) {
 	splitTime := strings.Fields(timeAgo)
 	numericTime, err := strconv.ParseUint(splitTime[0], 10, 16)
@@ -66,45 +73,40 @@ func parseAge(timeAgo string) (*time.Time, error) {
 	return &fromNow, err
 }
 
-func NewKatRow(n *html.Node) (k *KatRow, err error) {
-	name := cascadia.MustCompile(".cellMainLink").MatchFirst(n).FirstChild.Data
+func NewKatPage(page *http.Response) ([]*KatRow, error) {
+	doc, err := goquery.NewDocumentFromResponse(page)
+	if err != nil {
+		return nil, err
+	}
 
-	// magnet parsing
-	var magnet string
-	for _, attribute := range cascadia.MustCompile(".imagnet").MatchFirst(n).Attr {
-		if attribute.Key == "href" {
-			magnet = attribute.Val
-			break
+	howManyTorrents := doc.Find("table .odd, table .even")
+	torrentList := make([]*KatRow, howManyTorrents.Length())
+
+	howManyTorrents.Each(func(i int, torrent *goquery.Selection) {
+		name := torrent.Find(".cellMainLink").First().Text()
+		magnet, _ := torrent.Find(".imagnet").First().Attr("href")
+		size, err := parseSize(torrent.Find(".nobr.center").First().Text())
+		if err != nil {
+			fmt.Println(err)
+			return
 		}
-	}
-
-	// size parsing
-	statsEl := cascadia.MustCompile(".nobr.center").MatchFirst(n)
-	sizeEl := statsEl.FirstChild
-	sizeQty := sizeEl.NextSibling.FirstChild.Data
-
-	sizeAmount, err := strconv.ParseFloat(strings.TrimSpace(sizeEl.Data), 32)
-	if err != nil {
-		return nil, err
-	}
-	size, err := parseSize(float32(sizeAmount), sizeQty)
-	if err != nil {
-		return nil, err
-	}
-
-	files, err := strconv.ParseUint(strings.TrimSpace(cascadia.MustCompile("td.center:not(.nobr)").MatchFirst(n).FirstChild.Data), 10, 64)
-	if err != nil {
-		return nil, err
-	}
-
-	age, err := parseAge(cascadia.MustCompile("td.center:not(.nobr) + td").MatchFirst(n).FirstChild.Data)
-	if err != nil {
-		return nil, err
-	}
-
-	return &KatRow{Name: name, Magnet: magnet, Size: size, Files: files, Age: age}, nil
+		files, err := strconv.ParseUint(torrent.Find("td.center:not(.nobr)").First().Text(), 10, 64)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		age, err := parseAge(torrent.Find("td.center:not(.nobr) + td").First().Text())
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		torrentList[i] = &KatRow{Name: name, Magnet: magnet, Size: size, Files: files, Age: age}
+	})
+	// fmt.Printf("debug torrents:\n%#v\n", torrentList[4])
+	return torrentList, nil
 }
 
+// helper function for KatScout
 func fetchWithRetry(url string) (*http.Response, error) {
 	i := 0
 	for {
@@ -129,25 +131,21 @@ func KatScout(done chan uint16) (err error) {
 		fmt.Println(err)
 		return
 	}
-	defer htmlPage.Body.Close()
 	if htmlPage.StatusCode != http.StatusOK {
 		return errors.New(fmt.Sprintf("http returned non-OK statuscode: %d\n", htmlPage.StatusCode))
 	}
 
-	// checks done, let's kaboom this HTML
-	parsedPage, err := html.Parse(htmlPage.Body)
+	doc, err := goquery.NewDocumentFromResponse(htmlPage)
 	if err != nil {
 		return
 	}
 
-	// read how many pages
-	pages := cascadia.MustCompile(".turnoverButton.siteButton.bigButton:last-child").MatchFirst(parsedPage).FirstChild.Data
-	pagesParsed, err := strconv.ParseUint(pages, 10, 16)
+	pages, err := strconv.ParseUint(doc.Find(".turnoverButton.siteButton.bigButton:last-child").Text(), 10, 16)
 	if err != nil {
 		return
 	}
 
-	done <- uint16(pagesParsed)
+	done <- uint16(pages)
 	return nil
 }
 
@@ -182,7 +180,7 @@ func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client,
 		k.Fail(err, httpClient, httpChannel, collection, page)
 		return
 	}
-	defer htmlPage.Body.Close()
+	// defer htmlPage.Body.Close() goquery does that!!
 	if htmlPage.StatusCode != http.StatusOK {
 		k.Fail(
 			errors.New(fmt.Sprintf("unexpected statusCode: %d instead of 200", htmlPage.StatusCode)),
@@ -193,28 +191,11 @@ func (k *KatFetch) Fetch(httpClient *http.Client, httpChannel chan *http.Client,
 		return
 	}
 
-	// checks done, let's kaboom this HTML
-	parsedPage, err := html.Parse(htmlPage.Body)
+	katSlice, err := NewKatPage(htmlPage)
 	if err != nil {
 		k.Fail(err, httpClient, httpChannel, collection, page)
 		return
 	}
-	// create a selector for kat
-	katSelector := cascadia.MustCompile("table .odd, table .even")
-	torrentElements := katSelector.MatchAll(parsedPage)
-
-	katSlice := make([]*KatRow, len(torrentElements))
-
-	for index, element := range torrentElements {
-		katSlice[index], err = NewKatRow(element)
-		if err != nil {
-			fmt.Printf("KatRow failed: %s\n", err)
-			continue
-		}
-		// uber debug
-		// fmt.Printf("element: %v\n", katSlice[index])
-	}
-
 	k.Done(katSlice, httpClient, httpChannel, collection)
 }
 
@@ -299,7 +280,9 @@ func (k *KatFetchCollection) Success(fetch *KatFetch) error {
 	k.Data[k.Current] = fetch
 	k.Current++
 	k.ActiveFetchers--
-	fmt.Printf("active fetchers: %d\n", k.ActiveFetchers)
+	if k.ActiveFetchers < 9 {
+		fmt.Printf("active fetchers: %d\n", k.ActiveFetchers)
+	}
 	return nil
 }
 
@@ -318,7 +301,9 @@ func (k *KatFetchCollection) GetPage() (int, error) {
 		if k.Board[i] == false {
 			k.Board[i] = true
 			k.ActiveFetchers++
-			fmt.Printf("active fetchers: %d\n", k.ActiveFetchers)
+			if k.ActiveFetchers < 9 {
+				fmt.Printf("active fetchers: %d\n", k.ActiveFetchers)
+			}
 			return i + 1, nil
 		}
 	}
