@@ -4,9 +4,12 @@ import (
 	"github.com/mrgamer/trendingtorrents/fetchers"
 	"github.com/mrgamer/trendingtorrents/loggers"
 
+	tt "github.com/jackpal/Taipei-Torrent/torrent"
+
 	// "bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"time"
 )
@@ -27,6 +30,21 @@ func createHttpChannels(howmany int, channel chan *http.Client) (err error) {
 }
 
 func main() {
+	tSession, tError := tt.NewTorrentSession(&tt.TorrentFlags{
+		Dial:                nil,
+		Port:                7777,
+		FileDir:             ".",
+		SeedRatio:           1,
+		UseDeadlockDetector: false,
+		UseLPD:              false,
+		UseDHT:              true,
+		UseUPnP:             true,
+		UseNATPMP:           true,
+		TrackerlessMode:     false,
+		Gateway:             "",
+	}, "magnet:?xt=urn:btih:680A1BE8D653E60DD6B4D1BEEA3702AC87A3756C&dn=into+the+storm+2014+1080p+brrip+x264+yify&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337", 7778)
+	log.Printf("%v %v", tSession, tError)
+	// tSession.
 	overAllTime := loggers.NewRequest()
 	hChannel := make(chan *http.Client)
 	KatReady := make(chan uint16)
@@ -37,7 +55,7 @@ func main() {
 	// this will become a gopher
 	pages := <-KatReady
 	fmt.Printf("pages reported from scout: %d\n", pages)
-	kCollection := fetchers.NewKatFetchCollection(int(100))
+	kCollection := fetchers.NewKatFetchCollection(int(1))
 
 	go kCollection.ReceiveData()
 	// maybe board inside collection?
