@@ -67,13 +67,13 @@ func main() {
 
 	randomTorrent := lt.NewAdd_torrent_params()
 	randomTorrent.SetUrl("magnet:?xt=urn:btih:F5483E44EBD64519D5FEACFC22F7373B03B4CB59&dn=the+good+lie+2014+720p+brrip+x264+yify&tr=udp%3A%2F%2F9.rarbg.com%3A2710%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337")
-	randomTorrent.SetSave_path("./")
+	randomTorrent.SetSave_path(".")
 	// torrentInfo := lt.NewTorrent_info("magnet:?xt=urn:btih:F5483E44EBD64519D5FEACFC22F7373B03B4CB59&dn=the+good+lie+2014+720p+brrip+x264+yify&tr=udp%3A%2F%2F9.rarbg.com%3A2710%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337")
 	// randomTorrent.SetTi(torrentInfo)
 
 	ec := lt.NewError_code()
 	torrentSession := lt.NewSession()
-	torrentSession.Set_alert_mask(status_notification)
+	torrentSession.Set_alert_mask(status_notification + storage_notification)
 	torrentSession.Listen_on(lt.NewStd_pair_int_int(6900, 6999), ec)
 	if ec.Value() != 0 {
 		log.Println(ec.Message())
@@ -102,18 +102,31 @@ func main() {
 				HasMetadata:  tstatus.GetHas_metadata(),
 			}
 			log.Printf("\n%+v", torrentStatus)
-			time.Sleep(3 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 	}()
 
 	go func() {
 		for {
-			alert := torrentSession.Wait_for_alert(lt.NewTime_duration(int64(10 * time.Second)))
-			torrentSession.Pop_alert()
-			log.Printf("Alert: %#v", alert.What())
+			if torrentSession.Wait_for_alert(lt.Seconds(10)).Swigcptr() == 0 {
+				log.Println("Alert timeout occurred!")
+			}
+
+			alert := torrentSession.Pop_alert()
+			switch alert.What() {
+			default:
+				log.Printf("Alert: %#v", alert.What())
+			case "metadata_received_alert":
+				log.Println("Received Metadata!! finally!")
+				torrentHandle.Save_resume_data()
+			case "save_resume_data_alert":
+				log.Println("Wrote Metadata!")
+				// need to actually write the resume_data :( can't find how
+			case "save_resume_data_failed_alert":
+				log.Println("Failed Metadata!")
+			}
 		}
 	}()
 
-	log.Println(all_categories)
 	select {}
 }
